@@ -16,8 +16,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 装 Android SDK
-        uses: android-actions/setup-android@v3
+      - name: 检查 Android SDK（runner 自带，不再额外下载）
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" 2>/dev/null || true
+          ls "$ANDROID_HOME/build-tools" 2>/dev/null || true
+
+      - name: 确保 android-34 平台（失败也不中断）
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKM" ]; then
+            yes | "$SDKM" --licenses >/dev/null 2>&1 || true
+            "$SDKM" "platforms;android-34" "build-tools;34.0.0" || true
+          fi
 
       - name: 装 Gradle 8.2
         uses: gradle/actions/setup-gradle@v3
@@ -25,7 +36,7 @@ jobs:
           gradle-version: '8.2'
 
       - name: 编译 APK
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: 把 APK 传上来供下载
         uses: actions/upload-artifact@v4
