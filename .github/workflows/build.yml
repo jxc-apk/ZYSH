@@ -1,4 +1,3 @@
-
 name: build-apk
 
 on:
@@ -45,17 +44,28 @@ jobs:
       - name: 编译 APK
         id: build
         continue-on-error: true
-        run: gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
 
-      - name: 失败时把日志写回仓库（方便远程排查）
-        if: steps.build.outcome != 'success'
+      - name: 记录日志和 APK 清单（不管成败都跑）
+        if: always()
         run: |
           mkdir -p .logs
-          tail -c 150000 build.log > .logs/build-error.log || true
+          {
+            echo "===== 编译结果 ====="
+            echo "build outcome: ${{ steps.build.outcome }}"
+            echo ""
+            echo "===== 找 APK ====="
+            find . -name '*.apk' -not -path './.git/*' | head -50
+            echo ""
+            echo "===== 编译日志尾部 ====="
+            tail -c 120000 build.log 2>/dev/null
+          } > .logs/build-error.log 2>&1 || true
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -f .logs/build-error.log
-          git commit -m "记录编译错误日志" || true
+          git commit -m "记录编译日志" || true
           git push || true
 
       - name: 把 APK 传上来供下载
@@ -63,5 +73,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          path: app/build/outputs/**/*.apk
+          if-no-files-found: warn
