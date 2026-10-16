@@ -1,0 +1,35 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'top.qz0570.jxc'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "top.qz0570.jxc"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            // 不混淆：这个 App 只有几个类，混淆带来的风险大于收益
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // 只依赖 appcompat（提供 AppCompatActivity / 主题）。
+    // 不引 androidx.webkit：代码里用的是系统自带的 android.webkit.WebView，
+    // 少一个依赖就少一个编译失败的可能。
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+}

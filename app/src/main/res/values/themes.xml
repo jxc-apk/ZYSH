@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 用系统默认主题，不引第三方 UI 库；状态栏颜色跟网页主色接近 -->
+    <style name="Theme.Jxc" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowBackground">#FFF7F9FC</item>
+    </style>
+</resources>

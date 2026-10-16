@@ -1,0 +1,29 @@
+// 安卓外壳工程的 Gradle 配置
+//
+// ★ 国内必须配镜像 ★
+//   google() / mavenCentral() 在国内经常连不上或极慢，表现就是
+//   Android Studio 打开工程后一直转圈、或者报 "Could not resolve..."
+//   —— 看起来像"工程打不开"，其实就是依赖下不下来。
+//   所以把阿里云镜像放在最前面，国外源留在后面兜底。
+pluginManagement {
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "jxc-printer"
+include ':app'
