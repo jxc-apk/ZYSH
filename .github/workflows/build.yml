@@ -19,22 +19,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 检查 Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls "$ANDROID_HOME/platforms" 2>/dev/null || true
-          ls "$ANDROID_HOME/build-tools" 2>/dev/null || true
-
-      - name: 确保 android-34 平台
-        run: |
-          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ -x "$SDKM" ]; then
-            yes | "$SDKM" --licenses >/dev/null 2>&1 || true
-            "$SDKM" "platforms;android-34" "build-tools;34.0.0" || true
-          fi
-
-      - name: 指定 SDK 路径
+      - name: 指定 Android SDK 路径
         run: echo "sdk.dir=${ANDROID_HOME:-/usr/local/lib/android/sdk}" > local.properties
+
+      - name: 打开 AndroidX（上次失败就是缺这一行）
+        run: |
+          printf 'android.useAndroidX=true\nandroid.enableJetifier=true\norg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\n' > gradle.properties
+          cat gradle.properties
 
       - name: 装 Gradle 8.2
         uses: gradle/actions/setup-gradle@v3
@@ -43,7 +34,6 @@ jobs:
 
       - name: 编译 APK
         id: build
-        continue-on-error: true
         run: |
           set -o pipefail
           gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
