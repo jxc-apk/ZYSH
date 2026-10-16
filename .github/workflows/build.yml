@@ -1,8 +1,12 @@
+
 name: build-apk
 
 on:
   push:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -16,13 +20,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 检查 Android SDK（runner 自带，不再额外下载）
+      - name: 检查 Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           ls "$ANDROID_HOME/platforms" 2>/dev/null || true
           ls "$ANDROID_HOME/build-tools" 2>/dev/null || true
 
-      - name: 确保 android-34 平台（失败也不中断）
+      - name: 确保 android-34 平台
         run: |
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           if [ -x "$SDKM" ]; then
@@ -30,15 +34,32 @@ jobs:
             "$SDKM" "platforms;android-34" "build-tools;34.0.0" || true
           fi
 
+      - name: 指定 SDK 路径
+        run: echo "sdk.dir=${ANDROID_HOME:-/usr/local/lib/android/sdk}" > local.properties
+
       - name: 装 Gradle 8.2
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.2'
 
       - name: 编译 APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        id: build
+        continue-on-error: true
+        run: gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: 失败时把日志写回仓库（方便远程排查）
+        if: steps.build.outcome != 'success'
+        run: |
+          mkdir -p .logs
+          tail -c 150000 build.log > .logs/build-error.log || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f .logs/build-error.log
+          git commit -m "记录编译错误日志" || true
+          git push || true
 
       - name: 把 APK 传上来供下载
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
