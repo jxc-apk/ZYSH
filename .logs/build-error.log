@@ -48,8 +48,8 @@ Installing Android SDK Build-Tools 33.0.1 in /usr/local/lib/android/sdk/build-to
 > Task :app:processDebugJavaRes NO-SOURCE
 > Task :app:mergeDebugJniLibFolders
 > Task :app:processDebugManifestForPackage
-> Task :app:mergeDebugJavaResource
 > Task :app:checkDebugDuplicateClasses
+> Task :app:mergeDebugJavaResource
 > Task :app:processDebugResources
 > Task :app:mergeExtDexDebug
 
@@ -59,10 +59,10 @@ Note: Recompile with -Xlint:deprecation for details.
 
 > Task :app:dexBuilderDebug
 > Task :app:mergeDebugGlobalSynthetics
-> Task :app:mergeProjectDexDebug
-> Task :app:mergeDebugNativeLibs NO-SOURCE
 > Task :app:mergeLibDexDebug
+> Task :app:mergeDebugNativeLibs NO-SOURCE
 > Task :app:stripDebugDebugSymbols NO-SOURCE
+> Task :app:mergeProjectDexDebug
 > Task :app:validateSigningDebug
 > Task :app:writeDebugAppMetadata
 > Task :app:writeDebugSigningConfigVersions
@@ -70,5 +70,5 @@ Note: Recompile with -Xlint:deprecation for details.
 > Task :app:createDebugApkListingFileRedirect
 > Task :app:assembleDebug
 
-BUILD SUCCESSFUL in 1m 39s
+BUILD SUCCESSFUL in 1m 36s
 31 actionable tasks: 31 executed
