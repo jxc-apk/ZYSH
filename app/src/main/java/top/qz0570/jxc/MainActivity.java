@@ -37,6 +37,8 @@ import androidx.appcompat.app.AppCompatActivity;
  *     savedPrinter()           当前选的是哪台
  *     print(text, encoding)    打印（针式机用 GB18030）
  *     testConnect()            测试连接
+ *     saveImage(dataUrl, name) 把图片存进系统相册（WebView 不支持网页下载，必须走原生）
+ *     shareImage(dataUrl, name) 把图片分享给微信等应用（WebView 没有 Web Share API）
  *     toast(msg)               让原生弹个提示
  *   所有 @JavascriptInterface 方法都返回字符串（空串=成功，否则是错误说明），
  *   这样网页端不用做异常处理，也不会因为原生抛异常导致网页崩掉。
@@ -131,6 +133,75 @@ public class MainActivity extends AppCompatActivity {
             return result[0];
         }
 
+        /**
+         * 把一张图片（dataURL）**存进系统相册**
+         *
+         * 【为什么必须走原生】
+         *   App 是 WebView 壳子，而 WebView **不实现网页下载**：
+         *   网页里 `<a download href="data:image/png;base64,...">` 点击后什么都不会发生。
+         *   以前网页就调那个，还提示"已保存" —— 用户去相册根本找不到（真踩过）。
+         *   正确做法是用 MediaStore 把字节写进相册目录，系统媒体库会自动索引。
+         *
+         * @param dataUrl  "data:image/png;base64,xxxx" 或纯 base64
+         * @param fileName 文件名，如 销售出库凭证-PFXS20261016005.png
+         * @return 空串=成功；否则是给用户看的错误说明
+         */
+        @JavascriptInterface
+        public String saveImage(String dataUrl, String fileName) {
+            try {
+                byte[] png = decodeDataUrl(dataUrl);
+                if (png == null || png.length == 0) return "图片数据是空的";
+                Uri uri = insertToGallery(png, safeFileName(fileName));
+                if (uri == null) return "写进相册失败（存储空间或权限问题）";
+                return "";
+            } catch (OutOfMemoryError e) {
+                return "图片太大，内存不够";
+            } catch (Exception e) {
+                Log.w(TAG, "saveImage 失败", e);
+                return "保存失败：" + e.getMessage();
+            }
+        }
+
+        /**
+         * 把一张图片**分享给别的应用**（微信、QQ 等）
+         *
+         * 做法：先写进 MediaStore 拿到 content:// URI（这样别的应用有读权限，
+         * 不用配 FileProvider、不用改 Manifest），再把 URI 丢给系统分享面板。
+         *
+         * @return 空串=已把分享面板打开；否则是错误说明
+         */
+        @JavascriptInterface
+        public String shareImage(String dataUrl, String fileName) {
+            try {
+                byte[] png = decodeDataUrl(dataUrl);
+                if (png == null || png.length == 0) return "图片数据是空的";
+                String name = safeFileName(fileName);
+                final Uri uri = insertToGallery(png, name);
+                if (uri == null) return "准备图片失败（存储空间或权限问题）";
+                runOnUiThread(() -> {
+                    try {
+                        Intent send = new Intent(Intent.ACTION_SEND);
+                        send.setType("image/png");
+                        send.putExtra(Intent.EXTRA_STREAM, uri);
+                        // 授予临时读权限，微信之类的应用才能读到这张图
+                        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        Intent chooser = Intent.createChooser(send, "分享凭证图片");
+                        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(chooser);
+                    } catch (Exception e) {
+                        Log.w(TAG, "打开分享面板失败", e);
+                        Toast.makeText(MainActivity.this, "打开分享面板失败", Toast.LENGTH_SHORT).show();
+                    }
+                });
+                return "";
+            } catch (OutOfMemoryError e) {
+                return "图片太大，内存不够";
+            } catch (Exception e) {
+                Log.w(TAG, "shareImage 失败", e);
+                return "分享失败：" + e.getMessage();
+            }
+        }
+
         @JavascriptInterface
         public String testConnect() {
             final String[] result = {""};
@@ -157,6 +228,72 @@ public class MainActivity extends AppCompatActivity {
         public void toast(String msg) {
             runOnUiThread(() -> Toast.makeText(MainActivity.this, msg == null ? "" : msg, Toast.LENGTH_SHORT).show());
         }
+    }
+
+    // =======================================================================
+    // 图片保存 / 分享的底层实现（供 PrinterBridge 调用）
+    // =======================================================================
+
+    /**
+     * 解析 dataURL / 纯 base64 → PNG 字节
+     * 支持 "data:image/png;base64,xxxx" 和裸 base64 两种写法
+     */
+    private static byte[] decodeDataUrl(String dataUrl) {
+        if (dataUrl == null) return null;
+        String b64 = dataUrl.trim();
+        int comma = b64.indexOf(',');
+        if (b64.startsWith("data:") && comma > 0) b64 = b64.substring(comma + 1);
+        // 去掉换行等空白（有些环境会插入）
+        b64 = b64.replaceAll("\\s", "");
+        return android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+    }
+
+    /** 文件名兜底：去掉路径分隔符和非法字符，没有就给个默认名 */
+    private static String safeFileName(String fileName) {
+        String n = fileName == null ? "" : fileName.trim();
+        if (n.isEmpty()) n = "凭证.png";
+        n = n.replaceAll("[\\\\/:*?\"<>|]", "_");
+        if (!n.toLowerCase().endsWith(".png")) n = n + ".png";
+        return n;
+    }
+
+    /**
+     * 把 PNG 字节写进系统相册（MediaStore），返回 content:// URI
+     *
+     * 【安卓版本差异】
+     *   10 (API 29) 及以上：用 RELATIVE_PATH 指定相册子目录，**不需要任何存储权限**
+     *   9 及以下：要 WRITE_EXTERNAL_STORAGE 权限（Manifest 里已声明，仅 ≤28 生效）
+     */
+    @SuppressWarnings("deprecation")
+    private Uri insertToGallery(byte[] png, String fileName) throws Exception {
+        android.content.ContentValues cv = new android.content.ContentValues();
+        cv.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, fileName);
+        cv.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png");
+        boolean modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
+        if (modern) {
+            cv.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                    android.os.Environment.DIRECTORY_PICTURES + "/进销存");
+            cv.put(android.provider.MediaStore.Images.Media.IS_PENDING, 1);
+        }
+        Uri uri = getContentResolver().insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+        if (uri == null) return null;
+        java.io.OutputStream os = null;
+        try {
+            os = getContentResolver().openOutputStream(uri);
+            if (os == null) throw new java.io.IOException("打不开相册写入流");
+            os.write(png);
+            os.flush();
+        } finally {
+            if (os != null) {
+                try { os.close(); } catch (Exception ignored) {}
+            }
+        }
+        if (modern) {
+            android.content.ContentValues done = new android.content.ContentValues();
+            done.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0);
+            getContentResolver().update(uri, done, null, null);
+        }
+        return uri;
     }
 
     @SuppressLint("SetJavaScriptEnabled")
