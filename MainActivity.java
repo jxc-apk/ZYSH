@@ -12,6 +12,7 @@ import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
+import android.webkit.ValueCallback;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -48,10 +49,12 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "JxcPrinter";
     private static final String HOME_URL = "https://jxc.0570qz.top";
     private static final int REQ_BT = 1001;
-    private static final int REQ_CAMERA = 1002;
+       private static final int REQ_CAMERA = 1002;
+    private static final int REQ_FILE = 1003;
 
     private WebView web;
-    private BluetoothPrinter printer;
+        private BluetoothPrinter printer;
+    private ValueCallback<Uri[]> filePathCallback;
 
     // JavaScript 接口对象：网页通过 window.JxcPrinter 调用
     public class PrinterBridge {
@@ -356,9 +359,34 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
+                     @Override
+            public boolean onShowFileChooser(WebView webView,
+                                             ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
+                if (filePathCallback != null) {
+                    filePathCallback.onReceiveValue(null);
+                    filePathCallback = null;
+                }
+                filePathCallback = callback;
+                try {
+                    Intent intent = params.createIntent();
+                    if (params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    }
+                    startActivityForResult(intent, REQ_FILE);
+                    return true;
+                } catch (Exception e) {
+                    Log.w(TAG, "打开文件选择器失败", e);
+                    filePathCallback.onReceiveValue(null);
+                    filePathCallback = null;
+                    Toast.makeText(MainActivity.this, "打不开文件选择器", Toast.LENGTH_SHORT).show();
+                    return false;
+                }
+            }
+
             @Override
             public boolean onConsoleMessage(ConsoleMessage cm) {
-                Log.d(TAG, cm.message() + " @" + cm.sourceId() + ":" + cm.lineNumber());
+                Log.d(TAG, cm.message() + " @" + cm.sourceId() + ":" + cm.lineNumber()); 
                 return true;
             }
         });
