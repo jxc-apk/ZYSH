@@ -6,14 +6,6 @@
     1. WRITE_EXTERNAL_STORAGE  —— 安卓 10 及以下把凭证图写进相册
     2. <queries>               —— 安卓 11+ 包可见性，否则拉不起系统相机
     3. <provider> FileProvider —— 拍照临时文件必须走 content:// 交给相机
-
-  权限说明：
-    INTERNET            加载 https://jxc.0570qz.top
-    BLUETOOTH/ADMIN     安卓 11 及以下连蓝牙打印机（maxSdkVersion=30）
-    BLUETOOTH_CONNECT   安卓 12 及以上连已配对设备（需要运行时申请）
-    BLUETOOTH_SCAN      安卓 12 及以上读取已配对设备列表（neverForLocation，不要定位权限）
-    ACCESS_FINE_LOCATION 安卓 11 及以下扫描蓝牙需要（maxSdkVersion=30）
-    CAMERA              开单扫码 / 网页拍照
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
