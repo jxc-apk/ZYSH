@@ -53,7 +53,7 @@ FAILURE: Build failed with an exception.
 Execution failed for task ':app:processDebugResources'.
 > A failure occurred while executing com.android.build.gradle.internal.res.LinkApplicationAndroidResourcesTask$TaskAction
    > Android resource linking failed
-     /home/runner/work/ZYSH/ZYSH/app/build/intermediates/packaged_manifests/debug/AndroidManifest.xml:124: error: resource xml/file_paths (aka top.qz0570.jxc:xml/file_paths) not found.
+     /home/runner/work/ZYSH/ZYSH/app/build/intermediates/packaged_manifests/debug/AndroidManifest.xml:116: error: resource xml/file_paths (aka top.qz0570.jxc:xml/file_paths) not found.
      error: failed processing manifest.
 
 
@@ -216,7 +216,7 @@ Caused by: org.gradle.workers.internal.DefaultWorkerExecutor$WorkExecutionExcept
 	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
 	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:47)
 Caused by: com.android.builder.internal.aapt.v2.Aapt2Exception: Android resource linking failed
-/home/runner/work/ZYSH/ZYSH/app/build/intermediates/packaged_manifests/debug/AndroidManifest.xml:124: error: resource xml/file_paths (aka top.qz0570.jxc:xml/file_paths) not found.
+/home/runner/work/ZYSH/ZYSH/app/build/intermediates/packaged_manifests/debug/AndroidManifest.xml:116: error: resource xml/file_paths (aka top.qz0570.jxc:xml/file_paths) not found.
 error: failed processing manifest.
 
 	at com.android.builder.internal.aapt.v2.Aapt2Exception$Companion.create(Aapt2Exception.kt:45)
@@ -310,5 +310,5 @@ error: failed processing manifest.
 		at java.base/java.lang.Thread.run(Thread.java:840)
 
 
-BUILD FAILED in 55s
+BUILD FAILED in 51s
 17 actionable tasks: 17 executed
