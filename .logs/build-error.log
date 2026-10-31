@@ -42,10 +42,13 @@ Installing Android SDK Build-Tools 33.0.1 in /usr/local/lib/android/sdk/build-to
 > Task :app:compileDebugShaders NO-SOURCE
 > Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:mergeDebugAssets
-> Task :app:processDebugManifestForPackage
 > Task :app:compressDebugAssets
-> Task :app:processDebugResources FAILED
 > Task :app:desugarDebugFileDependencies
+> Task :app:processDebugJavaRes NO-SOURCE
+> Task :app:processDebugManifestForPackage
+> Task :app:mergeDebugJavaResource
+> Task :app:processDebugResources FAILED
+> Task :app:checkDebugDuplicateClasses
 
 FAILURE: Build failed with an exception.
 
@@ -310,5 +313,5 @@ error: failed processing manifest.
 		at java.base/java.lang.Thread.run(Thread.java:840)
 
 
-BUILD FAILED in 51s
-17 actionable tasks: 17 executed
+BUILD FAILED in 48s
+19 actionable tasks: 19 executed
