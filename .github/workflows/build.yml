@@ -31,6 +31,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.2'
+      - name: 生成 FileProvider 路径文件
+        run: |
+          rm -rf app/src/main/res/xml/file_paths.xml
+          mkdir -p app/src/main/res/xml
+          echo 'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPHBhdGhzIHhtbG5zOmFuZHJvaWQ9Imh0dHA6Ly9zY2hlbWFzLmFuZHJvaWQuY29tL2Fway9yZXMvYW5kcm9pZCI+CiAgICA8Y2FjaGUtcGF0aCBuYW1lPSJjYXB0dXJlIiBwYXRoPSJjYXB0dXJlLyIgLz4KICAgIDxleHRlcm5hbC1jYWNoZS1wYXRoIG5hbWU9ImV4dF9jYXB0dXJlIiBwYXRoPSJjYXB0dXJlLyIgLz4KICAgIDxmaWxlcy1wYXRoIG5hbWU9ImZpbGVzIiBwYXRoPSIuIiAvPgogICAgPGV4dGVybmFsLWZpbGVzLXBhdGggbmFtZT0iZXh0ZXJuYWxfZmlsZXNfZGlyIiBwYXRoPSIuIiAvPgogICAgPGV4dGVybmFsLXBhdGggbmFtZT0iZXh0ZXJuYWxfcm9vdCIgcGF0aD0iLiIgLz4KPC9wYXRocz4=' | base64 -d > app/src/main/res/xml/file_paths.xml
+          echo "===== 生成的 file_paths.xml ====="
+          cat app/src/main/res/xml/file_paths.xml
 
       - name: 编译 APK
         id: build
