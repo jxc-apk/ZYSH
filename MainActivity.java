@@ -11,8 +11,8 @@ import android.view.ViewGroup;
 import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
-import android.webkit.WebChromeClient;
 import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -43,17 +43,38 @@ import androidx.appcompat.app.AppCompatActivity;
  *     toast(msg)               让原生弹个提示
  *   所有 @JavascriptInterface 方法都返回字符串（空串=成功，否则是错误说明），
  *   这样网页端不用做异常处理，也不会因为原生抛异常导致网页崩掉。
+ *
+ * ===========================================================================
+ * 【2026-10-30 修改：补上 onShowFileChooser + 放开 content:// 访问】
+ * ===========================================================================
+ *   用户报：网页里「选文件」按钮点了完全没反应。
+ *
+ *   原因有两个，缺一不可：
+ *     ① Android WebView **默认不支持** <input type="file">，
+ *        宿主 App 必须在 WebChromeClient 里实现 onShowFileChooser()，
+ *        否则点击事件被静默吞掉，网页拿不到任何回调。
+ *     ② 原来 setAllowContentAccess(false) 会**禁止 WebView 读 content:// Uri**，
+ *        而文件选择器返回的就是 content://，所以就算弹出来了也传不上去。
+ *        现在改成 true。
+ * ===========================================================================
  */
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "JxcPrinter";
     private static final String HOME_URL = "https://jxc.0570qz.top";
     private static final int REQ_BT = 1001;
-       private static final int REQ_CAMERA = 1002;
+    private static final int REQ_CAMERA = 1002;
+    /** 网页 <input type="file"> 的请求码 */
     private static final int REQ_FILE = 1003;
 
     private WebView web;
-        private BluetoothPrinter printer;
+    private BluetoothPrinter printer;
+
+    /**
+     * 网页 file input 的回调句柄。
+     * 选了文件（或取消）之后必须调 filePathCallback.onReceiveValue(...)，
+     * 否则网页那边会一直卡着，而且下一次点击也不会再触发。
+     */
     private ValueCallback<Uri[]> filePathCallback;
 
     // JavaScript 接口对象：网页通过 window.JxcPrinter 调用
@@ -123,10 +144,7 @@ public class MainActivity extends AppCompatActivity {
                     result[0] = r;
                     lock.notifyAll();
                 }
-            });
-            th.start();
-            // 等最多 20 秒（连打印机慢的时候要等）
-            synchronized (lock) {
+            });            synchronized (lock) {
                 try {
                     lock.wait(20000);
                 } catch (InterruptedException ignored) {
@@ -298,7 +316,6 @@ public class MainActivity extends AppCompatActivity {
         }
         return uri;
     }
-
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -318,7 +335,12 @@ public class MainActivity extends AppCompatActivity {
         s.setUseWideViewPort(true);
         s.setSupportZoom(false);
         s.setAllowFileAccess(false);           // 不需要本地文件，关掉更安全
-        s.setAllowContentAccess(false);
+        /*
+         * ★ 2026-10-30 修：原来是 false —— 这会**禁止 WebView 读 content:// Uri**。
+         *   文件选择器返回的就是 content://xxx，所以选完文件网页根本读不到内容，
+         *   表现成"选了没用 / 上传失败"。必须改成 true。
+         */
+        s.setAllowContentAccess(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
@@ -359,17 +381,31 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
-                     @Override
+            /**
+             * ★ 2026-10-30 新增：网页 <input type="file"> 的入口。
+             *
+             * 没有这个方法时，用户点网页里的「选文件」什么都不会发生（被 WebView 静默吞掉）。
+             * 有了它，才会弹出系统的文件选择器。
+             *
+             * 注意两点：
+             *   1. 必须先保存 callback，拿到结果后**一定要**回调 onReceiveValue（哪怕传 null），
+             *      否则网页端会永远卡住，且下一次点击失效。
+             *   2. params.createIntent() 已经带好了 accept 过滤（网页写了 accept=".xlsx" 之类）。
+             */
+            @Override
             public boolean onShowFileChooser(WebView webView,
                                              ValueCallback<Uri[]> callback,
                                              FileChooserParams params) {
+                // 上一次没结束就再来的，先把旧的释放掉，避免句柄泄漏
                 if (filePathCallback != null) {
                     filePathCallback.onReceiveValue(null);
                     filePathCallback = null;
                 }
                 filePathCallback = callback;
+
                 try {
                     Intent intent = params.createIntent();
+                    // 网页端写了 multiple 属性时允许选多个
                     if (params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
                         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
                     }
@@ -386,7 +422,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public boolean onConsoleMessage(ConsoleMessage cm) {
-                Log.d(TAG, cm.message() + " @" + cm.sourceId() + ":" + cm.lineNumber()); 
+                Log.d(TAG, cm.message() + " @" + cm.sourceId() + ":" + cm.lineNumber());
                 return true;
             }
         });
@@ -396,6 +432,39 @@ public class MainActivity extends AppCompatActivity {
         // 一进来就申请蓝牙权限（安卓 12+ 需要）
         if (!BluetoothPrinter.hasPermission(this)) {
             BluetoothPrinter.requestPermission(this, REQ_BT);
+        }
+    }
+
+    /**
+     * ★ 2026-10-30 新增：接收文件选择器的结果，回传给网页。
+     *
+     * 三种情况都要处理，漏一个网页就会卡死：
+     *   ① 选了多个文件 → ClipData 里一个个取
+     *   ② 选了一个文件 → getData()
+     *   ③ 用户取消 → results = null（必须回调，不能直接 return）
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQ_FILE) {
+            if (filePathCallback == null) return;
+            Uri[] results = null;
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                if (data.getClipData() != null) {
+                    // 多选
+                    int n = data.getClipData().getItemCount();
+                    results = new Uri[n];
+                    for (int i = 0; i < n; i++) {
+                        results[i] = data.getClipData().getItemAt(i).getUri();
+                    }
+                } else if (data.getData() != null) {
+                    // 单选
+                    results = new Uri[]{data.getData()};
+                }
+            }
+            filePathCallback.onReceiveValue(results);
+            filePathCallback = null;
         }
     }
 
