@@ -39,6 +39,7 @@ import androidx.appcompat.app.AppCompatActivity;
  *   ① 补上 onShowFileChooser —— 否则网页 <input type="file"> 点了完全没反应
  *   ② setAllowContentAccess 改成 true —— 否则选完文件 WebView 读不到内容
  *   ③ 补上 onActivityResult 接收选择结果
+ *   ④ 补上旧版 openFileChooser 兼容（Android 4.4~5.0）
  */
 public class MainActivity extends AppCompatActivity {
 
@@ -47,12 +48,17 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQ_BT = 1001;
     private static final int REQ_CAMERA = 1002;
     private static final int REQ_FILE = 1003;
+    /** 旧版 WebView（Android 4.4~5.0）走 openFileChooser，单独一个请求码 */
+    private static final int REQ_FILE_LEGACY = 1004;
 
     private WebView web;
     private BluetoothPrinter printer;
 
-    /** 网页 file input 的回调句柄，拿到结果后必须回调 onReceiveValue */
+    /** 网页 file input 的回调句柄（新 API，返回 Uri[]） */
     private ValueCallback<Uri[]> filePathCallback;
+    /** 旧版 WebView 的回调句柄（只返回单个 Uri） */
+    @SuppressWarnings("rawtypes")
+    private ValueCallback legacyCallback;
 
     // ===================== JavaScript 接口 =====================
     public class PrinterBridge {
@@ -104,7 +110,6 @@ public class MainActivity extends AppCompatActivity {
             runOnUiThread(() -> BluetoothPrinter.requestPermission(MainActivity.this, REQ_BT));
             return "";
         }
-
         /**
          * 打印。JS 线程调进来的，必须另起线程做 socket 操作，
          * 否则抛 NetworkOnMainThreadException 直接崩。
@@ -133,6 +138,7 @@ public class MainActivity extends AppCompatActivity {
             }
             return result[0];
         }
+
         @JavascriptInterface
         public String testConnect() {
             final String[] result = {""};
@@ -242,7 +248,7 @@ public class MainActivity extends AppCompatActivity {
     private Uri insertToGallery(byte[] png, String fileName) throws Exception {
         android.content.ContentValues cv = new android.content.ContentValues();
         cv.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, fileName);
-        cv.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png");
+        cv.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png");        
         boolean modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
         if (modern) {
             cv.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
@@ -269,6 +275,7 @@ public class MainActivity extends AppCompatActivity {
         }
         return uri;
     }
+
     // ===================== 生命周期 =====================
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -330,6 +337,39 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
+            /*
+             * ★ 2026-10-31 兼容：Android 4.4~5.0 的 WebView 不调用 onShowFileChooser，
+             *   而是反射调用下面这三个 openFileChooser 重载。
+             *   没实现的话，老安卓上点「选文件」也是完全没反应。
+             *   三个重载都要写（不同版本调用的参数个数不一样）。
+             */
+            @SuppressWarnings("unused")
+            public void openFileChooser(ValueCallback<Uri> uploadMsg) {
+                openFileChooser(uploadMsg, null);
+            }
+
+            @SuppressWarnings("unused")
+            public void openFileChooser(ValueCallback<Uri> uploadMsg, String acceptType) {
+                openFileChooser(uploadMsg, acceptType, null);
+            }
+
+            @SuppressWarnings("unused")
+            public void openFileChooser(ValueCallback<Uri> uploadMsg, String acceptType, String capture) {
+                legacyCallback = uploadMsg;
+                try {
+                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("*/*");
+                    startActivityForResult(Intent.createChooser(intent, "选择文件"), REQ_FILE_LEGACY);
+                } catch (Exception e) {
+                    Log.w(TAG, "旧版文件选择器打开失败", e);
+                    if (legacyCallback != null) {
+                        legacyCallback.onReceiveValue(null);
+                        legacyCallback = null;
+                    }
+                    Toast.makeText(MainActivity.this, "打不开文件选择器（旧版）", Toast.LENGTH_SHORT).show();
+                }            }
+
             /**
              * ★ 网页 <input type="file"> 的入口。
              * 没有这个方法时，点网页的「选文件」完全没反应（被 WebView 静默吞掉）。
@@ -344,6 +384,8 @@ public class MainActivity extends AppCompatActivity {
                     filePathCallback = null;
                 }
                 filePathCallback = callback;
+                // ★ 诊断用：如果点了「选文件」看到这个提示，说明新 API 被调用了
+                Toast.makeText(MainActivity.this, "正在打开文件选择器…", Toast.LENGTH_SHORT).show();
                 try {
                     Intent intent = params.createIntent();
                     if (params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
@@ -381,6 +423,16 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        // 旧版 WebView 的选择结果（单个 Uri）
+        if (requestCode == REQ_FILE_LEGACY) {
+            if (legacyCallback != null) {
+                Uri result = (resultCode == Activity.RESULT_OK && data != null) ? data.getData() : null;
+                legacyCallback.onReceiveValue(result);
+                legacyCallback = null;
+            }
+            return;
+        }
 
         if (requestCode == REQ_FILE) {
             if (filePathCallback == null) return;
