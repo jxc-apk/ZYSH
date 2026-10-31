@@ -1,4 +1,4 @@
-.package top.qz0570.jxc;
+package top.qz0570.jxc;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
@@ -7,8 +7,6 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.Gravity;
-import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
@@ -18,8 +16,6 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.Button;
-import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -27,9 +23,22 @@ import androidx.appcompat.app.AppCompatActivity;
 
 /**
  * 进销存 App 外壳
- * WebView 直接加载线上地址 https://jxc.0570qz.top
- * JS桥：window.JxcPrinter
- * 新增：悬浮一键删除按钮，调用网页 jxcClearBill() 清空单据明细
+ *
+ * WebView 直接加载 https://jxc.0570qz.top，网页改了手机不用重装 APK。
+ *
+ * 给网页暴露 window.JxcPrinter：
+ *   isAvailable / platform / listPaired / selectPrinter / savedPrinter
+ *   isBluetoothOn / hasPermission / requestPermission
+ *   print(text, encoding)      打印，返回 "" 表示成功，否则是错误说明
+ *   testConnect()              测试连接，返回同上
+ *   saveImage(dataUrl, name)   存进系统相册
+ *   shareImage(dataUrl, name)  分享给微信等
+ *   toast(msg)                 原生提示
+ *
+ * 2026-10-30 修复：
+ *   ① 补上 onShowFileChooser —— 否则网页 <input type="file"> 点了完全没反应
+ *   ② setAllowContentAccess 改成 true —— 否则选完文件 WebView 读不到内容
+ *   ③ 补上 onActivityResult 接收选择结果
  */
 public class MainActivity extends AppCompatActivity {
 
@@ -41,9 +50,11 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView web;
     private BluetoothPrinter printer;
-    private ValueCallback<Uri[]> filePathCallback;
-    private Button btnClear; //一键删除悬浮按钮
 
+    /** 网页 file input 的回调句柄，拿到结果后必须回调 onReceiveValue */
+    private ValueCallback<Uri[]> filePathCallback;
+
+    // ===================== JavaScript 接口 =====================
     public class PrinterBridge {
 
         @JavascriptInterface
@@ -94,28 +105,60 @@ public class MainActivity extends AppCompatActivity {
             return "";
         }
 
+        /**
+         * 打印。JS 线程调进来的，必须另起线程做 socket 操作，
+         * 否则抛 NetworkOnMainThreadException 直接崩。
+         * 主线程最多等 20 秒（连打印机慢的时候要等）。
+         */
         @JavascriptInterface
-        public void print(String text, String encoding) {
+        public String print(String text, String encoding) {
             final String t = text == null ? "" : text;
             final String enc = encoding == null ? "GB18030" : encoding;
-            new Thread(() -> {
+            final Object lock = new Object();
+            final String[] result = {""};
+            Thread th = new Thread(() -> {
                 String r = printer.print(t, enc);
-                runOnUiThread(() -> {
-                    web.evaluateJavascript("if(window.JxcPrintCallback){window.JxcPrintCallback(" + wrapJsString(r) + ")}", null);
-                });
-            }).start();
+                synchronized (lock) {
+                    result[0] = r;
+                    lock.notifyAll();
+                }
+            });
+            th.start();
+            synchronized (lock) {
+                try {
+                    lock.wait(20000);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return result[0];
         }
-
         @JavascriptInterface
-        public void testConnect() {
-            new Thread(() -> {
+        public String testConnect() {
+            final String[] result = {""};
+            final Object lock = new Object();
+            Thread th = new Thread(() -> {
                 String r = printer.testConnect();
-                runOnUiThread(() -> {
-                    web.evaluateJavascript("if(window.JxcTestCallback){window.JxcTestCallback(" + wrapJsString(r) + ")}", null);
-                });
-            }).start();
+                synchronized (lock) {
+                    result[0] = r;
+                    lock.notifyAll();
+                }
+            });
+            th.start();
+            synchronized (lock) {
+                try {
+                    lock.wait(20000);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return result[0];
         }
 
+        /**
+         * 把 dataURL 存进系统相册。
+         * WebView 不实现网页下载（<a download> 无效），必须走 MediaStore。
+         */
         @JavascriptInterface
         public String saveImage(String dataUrl, String fileName) {
             try {
@@ -132,6 +175,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        /** 把图片分享给别的应用（微信、QQ 等） */
         @JavascriptInterface
         public String shareImage(String dataUrl, String fileName) {
             try {
@@ -169,11 +213,9 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private static String wrapJsString(String s) {
-        if(s == null) return "null";
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r") + "\"";
-    }
+    // ===================== 图片工具 =====================
 
+    /** 解析 dataURL / 纯 base64 → PNG 字节 */
     private static byte[] decodeDataUrl(String dataUrl) {
         if (dataUrl == null) return null;
         String b64 = dataUrl.trim();
@@ -183,6 +225,7 @@ public class MainActivity extends AppCompatActivity {
         return android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
     }
 
+    /** 文件名兜底：去掉非法字符，没有扩展名就补 .png */
     private static String safeFileName(String fileName) {
         String n = fileName == null ? "" : fileName.trim();
         if (n.isEmpty()) n = "凭证.png";
@@ -191,6 +234,10 @@ public class MainActivity extends AppCompatActivity {
         return n;
     }
 
+    /**
+     * 写进系统相册（MediaStore），返回 content:// URI
+     * 安卓 10+ 不需要存储权限；9 及以下要 WRITE_EXTERNAL_STORAGE（Manifest 已声明）
+     */
     @SuppressWarnings("deprecation")
     private Uri insertToGallery(byte[] png, String fileName) throws Exception {
         android.content.ContentValues cv = new android.content.ContentValues();
@@ -222,6 +269,7 @@ public class MainActivity extends AppCompatActivity {
         }
         return uri;
     }
+    // ===================== 生命周期 =====================
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -229,38 +277,20 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         printer = new BluetoothPrinter(this);
-        // 外层FrameLayout，用来放webview+悬浮按钮
-        FrameLayout root = new FrameLayout(this);
+
         web = new WebView(this);
-        root.addView(web, new FrameLayout.LayoutParams(
+        setContentView(web, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        // ========== 悬浮一键删除按钮 ==========
-        btnClear = new Button(this);
-        btnClear.setText("一键删除");
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(220, FrameLayout.LayoutParams.WRAP_CONTENT);
-        lp.gravity = Gravity.BOTTOM | Gravity.RIGHT;
-        lp.rightMargin = 40;
-        lp.bottomMargin = 120;
-        btnClear.setLayoutParams(lp);
-        btnClear.setBackgroundColor(0xffdd3333);
-        btnClear.setTextColor(0xffffffff);
-        btnClear.setOnClickListener(v -> {
-            // 调用网页全局清空函数
-            web.evaluateJavascript("if(window.jxcClearBill){window.jxcClearBill();}else{alert('网页未实现jxcClearBill')}", null);
-        });
-        root.addView(btnClear);
-
-        setContentView(root);
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
+        s.setDomStorageEnabled(true);          // 登录状态在 localStorage，必须开
         s.setDatabaseEnabled(true);
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setSupportZoom(false);
         s.setAllowFileAccess(false);
+        // ★ 必须 true：文件选择器返回 content:// URI，false 的话 WebView 读不到内容
         s.setAllowContentAccess(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -273,10 +303,12 @@ public class MainActivity extends AppCompatActivity {
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                // 站内链接留在 App，别的跳系统浏览器
                 if (url != null && url.startsWith(HOME_URL)) return false;
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
                 return true;
             }
         });
@@ -284,6 +316,7 @@ public class MainActivity extends AppCompatActivity {
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
+                // 扫码/拍照要用摄像头
                 runOnUiThread(() -> {
                     if (androidx.core.content.ContextCompat.checkSelfPermission(
                             MainActivity.this, android.Manifest.permission.CAMERA)
@@ -292,12 +325,16 @@ public class MainActivity extends AppCompatActivity {
                                 MainActivity.this,
                                 new String[]{android.Manifest.permission.CAMERA},
                                 REQ_CAMERA);
-                    } else {
-                        request.grant(request.getResources());
                     }
+                    request.grant(request.getResources());
                 });
             }
 
+            /**
+             * ★ 网页 <input type="file"> 的入口。
+             * 没有这个方法时，点网页的「选文件」完全没反应（被 WebView 静默吞掉）。
+             * 拿到结果后必须调 onReceiveValue（哪怕传 null），否则网页会一直卡着。
+             */
             @Override
             public boolean onShowFileChooser(WebView webView,
                                              ValueCallback<Uri[]> callback,
@@ -337,9 +374,14 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * ★ 接收文件选择器的结果，回传给网页。
+     * 三种情况都要处理（多选 / 单选 / 取消），漏一个网页就卡死。
+     */
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
         if (requestCode == REQ_FILE) {
             if (filePathCallback == null) return;
             Uri[] results = null;
@@ -377,19 +419,5 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, ok ? "蓝牙权限已允许" : "没有蓝牙权限就打不了单，请到系统设置里允许",
                     Toast.LENGTH_LONG).show();
         }
-    }
-
-    @Override
-    protected void onDestroy() {
-        if (web != null) {
-            web.stopLoading();
-            web.setWebChromeClient(null);
-            web.setWebViewClient(null);
-            web.removeJavascriptInterface("JxcPrinter");
-            ((ViewGroup)web.getParent()).removeView(web);
-            web.destroy();
-            web = null;
-        }
-        super.onDestroy();
     }
 }
